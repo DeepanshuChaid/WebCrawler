@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -86,6 +87,51 @@ func discoverLinks(body io.Reader, baseUrl string) []string {
 }
 
 
-func worker(id int, jobs <- chan string, results chan <- []string, wg sync.WaitGroup) {
-	for link
+func worker(id int, jobs <- chan string, results chan <- []string, wg *sync.WaitGroup) {
+	for link := range jobs {
+		fmt.Printf("[Worker %d] Crawling: %s\n", id, link)
+		found := fetchLinks(link)
+		results <- found
+		wg.Done()
+	}
+}
+
+func main() {
+	startURL := "https://go.dev"
+	u, _ := url.Parse(startURL)
+
+	tracker := &SafeMap{
+		visited: make(map[string]bool),
+		host: u.Host,
+	}
+	jobs := make(chan string, 100)
+	results := make(chan []string)
+
+	var wg sync.WaitGroup
+
+	numWorkers := 10
+	for i := 1; i <= numWorkers; i++ {
+		go worker(i, jobs, results, &wg)
+	}
+
+	wg.Add(1)
+	tracker.visited[startURL] = true
+	jobs <- startURL
+
+	go func () {
+		for foundLinks := range results {
+			for _, link := range foundLinks {
+				if normalized, ok := tracker.ShouldVisit(link); ok {
+					wg.Add(1)
+					jobs <- normalized
+				}
+			}
+		}
+	}()
+
+	wg.Wait()
+	close(jobs)
+	close(results)
+
+	fmt.Printf("\nDone. Visited %d unique pages.\n", len(tracker.visited))
 }
